@@ -1,71 +1,78 @@
 import os
-from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
+from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    filters,
+    ContextTypes,
+    ConversationHandler,
+)
 
-# Этапы диалога
 MODEL, STORAGE, CONDITION = range(3)
 
-# Данные
-MODELS = ["iPhone 11", "iPhone 12", "iPhone 13", "iPhone 14", "iPhone 15", "iPhone 16"]
+MODELS = ["iPhone 11", "iPhone 12", "iPhone 12 mini", "iPhone 12 Pro", "iPhone 12 Pro Max",
+          "iPhone 13", "iPhone 13 mini", "iPhone 13 Pro", "iPhone 13 Pro Max",
+          "iPhone 14", "iPhone 14 Plus", "iPhone 14 Pro", "iPhone 14 Pro Max",
+          "iPhone 15", "iPhone 15 Plus", "iPhone 15 Pro", "iPhone 15 Pro Max",
+          "iPhone 16"]
+
 STORAGES = ["64", "128", "256", "512"]
 CONDITIONS = ["Идеальное", "Хорошее", "Ниже хорошего"]
 
 TRADEIN_PRICES = {
     ("iPhone 11", "64"): 8000,
     ("iPhone 16", "128"): 45000,
-    # Добавь остальные по необходимости
+    # ... остальные цены ...
 }
 
-# Главное меню
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    reply_markup = ReplyKeyboardMarkup([
-        ["\ud83d\udcf1 Начать оценку"],
-        ["\u2139\ufe0f Как работает Trade-In"],
-        ["\u260e\ufe0f Связаться с менеджером"]
-    ], resize_keyboard=True)
-    await update.message.reply_text("Добро пожаловать! Выберите действие:", reply_markup=reply_markup)
-    return ConversationHandler.END
-
-# Обработка главного меню
-async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-    if text == "\ud83d\udcf1 Начать оценку":
-        return await choose_model_prompt(update, context)
-    elif text == "\u2139\ufe0f Как работает Trade-In":
-        await update.message.reply_text("\u2705 Вы сдаете устройство, мы его оцениваем и предлагаем сумму. Если вас устраивает — оформляем сделку.")
-    elif text == "\u260e\ufe0f Связаться с менеджером":
-        await update.message.reply_text("\u2709\ufe0f Напишите нам: @YourManagerUsername")
-    return ConversationHandler.END
-
-# Первый шаг оценки
-async def choose_model_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    reply_markup = ReplyKeyboardMarkup([MODELS[i:i+2] for i in range(0, len(MODELS), 2)] + [["\u274c Отмена"]], resize_keyboard=True)
-    await update.message.reply_text("Выберите модель iPhone:", reply_markup=reply_markup)
+    reply_markup = ReplyKeyboardMarkup(
+        [MODELS[i:i + 2] for i in range(0, len(MODELS), 2)] + [["Отмена"]],
+        one_time_keyboard=True, resize_keyboard=True
+    )
+    await update.message.reply_text("Привет! Выбери модель iPhone:", reply_markup=reply_markup)
     return MODEL
 
+
 async def choose_model(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if update.message.text == "\u274c Отмена":
-        return await start(update, context)
-    context.user_data["model"] = update.message.text
-    reply_markup = ReplyKeyboardMarkup([STORAGES] + [["\u274c Отмена"]], resize_keyboard=True)
-    await update.message.reply_text("Укажите объём памяти:", reply_markup=reply_markup)
+    text = update.message.text
+    if text == "Отмена":
+        return await cancel(update, context)
+
+    context.user_data["model"] = text
+    reply_markup = ReplyKeyboardMarkup(
+        [STORAGES] + [["Отмена"]],
+        one_time_keyboard=True, resize_keyboard=True
+    )
+    await update.message.reply_text("Укажи объём памяти (в ГБ):", reply_markup=reply_markup)
     return STORAGE
 
+
 async def choose_storage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if update.message.text == "\u274c Отмена":
-        return await start(update, context)
-    context.user_data["storage"] = update.message.text
-    reply_markup = ReplyKeyboardMarkup([CONDITIONS] + [["\u274c Отмена"]], resize_keyboard=True)
-    await update.message.reply_text("Какое состояние устройства?", reply_markup=reply_markup)
+    text = update.message.text
+    if text == "Отмена":
+        return await cancel(update, context)
+
+    context.user_data["storage"] = text
+    reply_markup = ReplyKeyboardMarkup(
+        [CONDITIONS] + [["Отмена"]],
+        one_time_keyboard=True, resize_keyboard=True
+    )
+    await update.message.reply_text("Укажи состояние устройства:", reply_markup=reply_markup)
     return CONDITION
 
+
 async def choose_condition(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if update.message.text == "\u274c Отмена":
-        return await start(update, context)
+    text = update.message.text
+    if text == "Отмена":
+        return await cancel(update, context)
 
     model = context.user_data["model"]
     storage = context.user_data["storage"]
-    condition = update.message.text
+    condition = text
 
     key = (model, storage)
     base_price = TRADEIN_PRICES.get(key)
@@ -76,19 +83,44 @@ async def choose_condition(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         elif condition == "Хорошее":
             price = int(base_price * 0.9)
         else:
-            price = "\ud83d\udccc Индивидуальная оценка — обратитесь к менеджеру"
+            price = "📌 Индивидуальная оценка — обратитесь к менеджеру"
     else:
-        price = "\ud83d\udccc Цены для этой конфигурации нет — индивидуальная оценка"
+        price = "📌 Цены для этой конфигурации нет — индивидуальная оценка"
+
+    # Инлайн кнопка для перезапуска
+    restart_keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔁 Начать заново", callback_data="restart")]
+    ])
 
     await update.message.reply_text(
-        f"\ud83d\udcf1 Модель: {model}\n\ud83d\udcc0 Память: {storage} ГБ\n\ud83d\udd27 Состояние: {condition}\n\n"
-        f"\ud83d\udcb0 Оценка: {price}\n\nЧтобы начать заново — нажмите /start"
+        f"📱 Модель: {model}\n💾 Память: {storage} ГБ\n🔧 Состояние: {condition}\n\n"
+        f"💰 Оценка: {price}",
+        reply_markup=restart_keyboard
     )
     return ConversationHandler.END
 
-# Главная отмена
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    return await start(update, context)
+    await update.message.reply_text("Оценка отменена. Чтобы начать заново, нажмите /start")
+    return ConversationHandler.END
+
+
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "restart":
+        # Отправим новое сообщение и начнём с выбора модели
+        await context.bot.send_message(
+            chat_id=query.message.chat.id,
+            text="🎬 Перезапускаем оценку. Выбери модель iPhone:",
+            reply_markup=ReplyKeyboardMarkup(
+                [MODELS[i:i + 2] for i in range(0, len(MODELS), 2)] + [["Отмена"]],
+                resize_keyboard=True
+            )
+        )
+        return MODEL
+
 
 def main():
     token = os.getenv("BOT_TOKEN")
@@ -99,17 +131,18 @@ def main():
         states={
             MODEL: [MessageHandler(filters.TEXT & ~filters.COMMAND, choose_model)],
             STORAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, choose_storage)],
-            CONDITION: [MessageHandler(filters.TEXT & ~filters.COMMAND, choose_condition)]
+            CONDITION: [MessageHandler(filters.TEXT & ~filters.COMMAND, choose_condition)],
         },
         fallbacks=[
-            MessageHandler(filters.Regex("^\u274c Отмена$"), cancel)
+            CommandHandler("cancel", cancel),
+            MessageHandler(filters.Regex("^Отмена$"), cancel),
         ],
     )
 
     application.add_handler(conv_handler)
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_handler))
-
+    application.add_handler(CallbackQueryHandler(button_callback))
     application.run_polling()
+
 
 if __name__ == "__main__":
     main()
